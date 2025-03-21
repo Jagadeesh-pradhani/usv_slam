@@ -2,7 +2,7 @@
 
 import rclpy
 from rclpy.node import Node
-import RPi.GPIO as GPIO
+import gpiod
 import sys, tty, termios, threading, time
 
 class KeyboardControlNode(Node):
@@ -19,14 +19,23 @@ class KeyboardControlNode(Node):
         self.motor1_in2 = 13
         self.motor2_in3 = 18
         self.motor2_in4 = 23
-
-        # GPIO Setup
-        GPIO.setmode(GPIO.BCM)
-        GPIO.setwarnings(False)
+        
+        # GPIO Setup using updated gpiod API
+        self.chip = gpiod.Chip('gpiochip0')
+        
+        # Create dictionaries to store lines
+        self.pins = {}
+        
+        # Configure all pins
         for pin in self.W_PINS + self.S_PINS + self.A_PINS + self.D_PINS + [
             self.motor1_in1, self.motor1_in2, self.motor2_in3, self.motor2_in4]:
-            GPIO.setup(pin, GPIO.OUT)
-            GPIO.output(pin, GPIO.HIGH)  # Initially set all pins HIGH
+            try:
+                # Get the GPIO line and configure it as output
+                self.pins[pin] = self.chip.get_line(pin)
+                self.pins[pin].request(consumer="keyboard_control", type=gpiod.LINE_REQ_DIR_OUT)
+                self.pins[pin].set_value(1)  # Initially set all pins HIGH
+            except Exception as e:
+                self.get_logger().error(f"Error setting up pin {pin}: {e}")
 
         # Key state dictionary
         self.key_states = {'w': False, 's': False, 'a': False, 'd': False, 'r': False}
@@ -48,30 +57,40 @@ class KeyboardControlNode(Node):
             termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
         return ch
 
+    def set_pin_value(self, pin, value):
+        """Set a pin value safely."""
+        try:
+            if pin in self.pins:
+                self.pins[pin].set_value(value)
+            else:
+                self.get_logger().error(f"Pin {pin} not configured")
+        except Exception as e:
+            self.get_logger().error(f"Error setting pin {pin} to {value}: {e}")
+
     def rotate_clockwise(self, duration):
         """Rotate motors clockwise for a duration."""
-        GPIO.output(self.motor1_in1, GPIO.HIGH)
-        GPIO.output(self.motor1_in2, GPIO.LOW)
-        GPIO.output(self.motor2_in3, GPIO.HIGH)
-        GPIO.output(self.motor2_in4, GPIO.LOW)
+        self.set_pin_value(self.motor1_in1, 1)
+        self.set_pin_value(self.motor1_in2, 0)
+        self.set_pin_value(self.motor2_in3, 1)
+        self.set_pin_value(self.motor2_in4, 0)
         time.sleep(duration)
         self.stop_motors()
 
     def rotate_anticlockwise(self, duration):
         """Rotate motors anticlockwise for a duration."""
-        GPIO.output(self.motor1_in1, GPIO.LOW)
-        GPIO.output(self.motor1_in2, GPIO.HIGH)
-        GPIO.output(self.motor2_in3, GPIO.LOW)
-        GPIO.output(self.motor2_in4, GPIO.HIGH)
+        self.set_pin_value(self.motor1_in1, 0)
+        self.set_pin_value(self.motor1_in2, 1)
+        self.set_pin_value(self.motor2_in3, 0)
+        self.set_pin_value(self.motor2_in4, 1)
         time.sleep(duration)
         self.stop_motors()
 
     def stop_motors(self):
         """Stops both motors."""
-        GPIO.output(self.motor1_in1, GPIO.LOW)
-        GPIO.output(self.motor1_in2, GPIO.LOW)
-        GPIO.output(self.motor2_in3, GPIO.LOW)
-        GPIO.output(self.motor2_in4, GPIO.LOW)
+        self.set_pin_value(self.motor1_in1, 0)
+        self.set_pin_value(self.motor1_in2, 0)
+        self.set_pin_value(self.motor2_in3, 0)
+        self.set_pin_value(self.motor2_in4, 0)
 
     def run_conveyor(self):
         """Runs the conveyor system continuously as long as enabled."""
@@ -107,10 +126,10 @@ class KeyboardControlNode(Node):
                 else:
                     return
 
-                state = GPIO.LOW if self.key_states[key] else GPIO.HIGH
+                state = 0 if self.key_states[key] else 1  # 0 = LOW, 1 = HIGH
                 for pin in pins:
-                    GPIO.output(pin, state)
-                self.get_logger().info(f"Key '{key}' toggled. Pins {pins} set to {'LOW' if state == GPIO.LOW else 'HIGH'}.")
+                    self.set_pin_value(pin, state)
+                self.get_logger().info(f"Key '{key}' toggled. Pins {pins} set to {'LOW' if state == 0 else 'HIGH'}.")
         elif key == '\x03':  # Ctrl+C
             raise KeyboardInterrupt
 
@@ -126,7 +145,9 @@ class KeyboardControlNode(Node):
             self.conveyor_running = False
             if self.conveyor_thread:
                 self.conveyor_thread.join()
-            GPIO.cleanup()
+            # Release GPIO resources
+            for pin in self.pins.values():
+                pin.release()
             sys.exit(0)
 
 def main(args=None):

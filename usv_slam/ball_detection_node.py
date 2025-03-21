@@ -13,7 +13,7 @@ class BallDetectionNode(Node):
         self.get_logger().info("Ball Detection Node started.")
         self.subscription = self.create_subscription(
             Image,
-            '/camera/image_raw',
+            '/image_raw',
             self.image_callback,
             10)
         self.bridge = CvBridge()
