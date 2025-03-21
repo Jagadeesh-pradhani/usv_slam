@@ -1,6 +1,6 @@
 # Raspberry PI
-sudo apt install git
 # Package setup
+
 rm -rf ~/ros_ws/src/usv_slam
 cd ~/ros_ws/src
 git clone https://github.com/Jagadeesh-pradhani/usv_slam.git
