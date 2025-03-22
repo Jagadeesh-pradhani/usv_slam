@@ -24,7 +24,7 @@ def generate_launch_description():
         executable='v4l2_camera_node',
         arguments=[
             'image_size', "[640,480]",
-            'camera_frrame_id:', "base_link"
+            'camera_frame_id:', "base_link"
         ],
         output='screen',
     )
